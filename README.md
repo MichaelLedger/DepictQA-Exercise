@@ -284,7 +284,7 @@ If you find our work useful for your research and applications, please cite usin
 }
 ```
 
-## Practical Notes
+## Practical Notes - Issues
 ### Issue - The empty models array
 
 Because no workers have been registered with the controller. Here's what's happening:
@@ -304,3 +304,69 @@ Start the controller (port 10000)
 Start at least one worker (port 22222)
 
 Start the gradio web UI (port 8081)
+
+## Practical Notes - Cmds
+### how to exit conda
+`conda deactivate`
+
+### gradio demo for local test
+
+*prepare environment*
+```
+cd /Users/gavinxiang/Downloads/DepictQA-Exercise/experiments/DQ495K_Abstractor
+conda activate depictqa
+```
+
+1. Start the controller (port 10000)
+```
+(depictqa) ➜  DQ495K_Abstractor git:(main) ✗ sh launch_controller.sh 
+2025-09-02 13:45:47 | INFO | controller | cfg: {'dispatch_method': 'shortest_queue',
+ 'host': '127.0.0.1',
+ 'log_dir': '../log_serve/',
+ 'port': 10000}
+2025-09-02 13:45:47 | INFO | controller | Init controller
+2025-09-02 13:45:47 | ERROR | stderr | INFO:     Started server process [86791]
+2025-09-02 13:45:47 | ERROR | stderr | INFO:     Waiting for application startup.
+2025-09-02 13:45:47 | ERROR | stderr | INFO:     Application startup complete.
+2025-09-02 13:45:47 | ERROR | stderr | INFO:     Uvicorn running on http://127.0.0.1:10000 (Press CTRL+C to quit)
+```
+
+2. Start at least one worker (port 22222)
+```
+(depictqa) ➜  DQ495K_Abstractor git:(main) ✗ sh launch_worker.sh 
+Setting ds_accelerator to cuda (auto detect)
+...
+2025-09-02 13:46:52 | ERROR | stderr |     ].cuda()
+2025-09-02 13:46:52 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/cuda/__init__.py", line 403, in _lazy_init
+2025-09-02 13:46:52 | ERROR | stderr |     raise AssertionError("Torch not compiled with CUDA enabled")
+2025-09-02 13:46:52 | ERROR | stderr | AssertionError: Torch not compiled with CUDA enabled
+```
+
+3. Start the gradio web UI (port 8081)
+```
+(depictqa) ➜  DQ495K_Abstractor git:(main) ✗ sh launch_gradio.sh
+Setting ds_accelerator to cuda (auto detect)
+/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:49: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, input, weight, bias=None):
+/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:67: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, grad_output):
+/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torchvision/io/image.py:13: UserWarning: Failed to load image Python extension: dlopen(/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torchvision/image.so, 0x0006): Symbol not found: __ZN3c1017RegisterOperatorsD1Ev
+  Referenced from: <0B637046-A38B-3A5C-80C6-E847C27DCCD5> /Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torchvision/image.so
+  Expected in:     <B6BD92AE-4D03-3F92-9E03-2E2594A12866> /Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/lib/libtorch_cpu.dylib
+  warn(f"Failed to load image Python extension: {e}")
+2025-09-02 13:49:25 | INFO | gradio_web_server | cfg: {'concurrency_count': 10,
+ 'controller_url': 'http://127.0.0.1:10000',
+ 'embed': False,
+ 'host': '127.0.0.1',
+ 'log_dir': '../log_serve/',
+ 'model_list_mode': 'reload',
+ 'moderate': False,
+ 'port': 8081,
+ 'share': False}
+2025-09-02 13:49:25 | INFO | gradio_web_server | Models: []
+2025-09-02 13:49:27 | INFO | stdout | Running on local URL:  http://127.0.0.1:8081
+2025-09-02 13:49:27 | INFO | stdout | 
+2025-09-02 13:49:27 | INFO | stdout | To create a public link, set `share=True` in `launch()`.
+```
+
+4. Visit gradio demo: http://127.0.0.1:8081
