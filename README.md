@@ -305,6 +305,258 @@ Start at least one worker (port 22222)
 
 Start the gradio web UI (port 8081)
 
+### Issue - the MPS framework doesn't support float64
+```
+2025-09-02 14:05:29 | INFO | stdout | INFO:     127.0.0.1:62634 - "POST /worker_generate_stream HTTP/1.1" 200 OK
+2025-09-02 14:05:29 | INFO | model_worker | Task: quality_single_A
+2025-09-02 14:05:29 | INFO | model_worker | Reference path: ../log_serve/serve_images/2025-09-02/e003dec3dcd0ae2a62707dfafc03c34b.png
+2025-09-02 14:05:29 | INFO | model_worker | Image A path: ../log_serve/serve_images/2025-09-02/36b5474e095f522961deacaec7fac849.png
+2025-09-02 14:05:29 | INFO | model_worker | Image B path: None
+2025-09-02 14:05:29 | INFO | model_worker | query: 
+2025-09-02 14:05:29 | ERROR | stderr | --- Logging error ---
+2025-09-02 14:05:29 | ERROR | stderr | Traceback (most recent call last):
+2025-09-02 14:05:29 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/depictqa.py", line 113, in load_img
+2025-09-02 14:05:29 | ERROR | stderr |     img = self.vision_preprocess(img).to(device)  # [1, 3, H, W]
+2025-09-02 14:05:29 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/clip/clip.py", line 150, in __call__
+2025-09-02 14:05:29 | ERROR | stderr |     img = torch.tensor(img).permute(2, 0, 1).to(device)
+2025-09-02 14:05:29 | ERROR | stderr | TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64. Please use float32 instead.
+
+```
+
+```
+# src/model/clip/clip.py
+- img = np.array(img) / 255.0
++ img = np.array(img, dtype=np.float32) / 255.0
+
+  device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+  
+- img = torch.tensor(img).permute(2, 0, 1).to(device)
++ img = torch.tensor(img, dtype=torch.float32).permute(2, 0, 1).to(device)
+```
+
+### Issue  - 'LoraModel' object has no attribute 'generate'
+```
+2025-09-02 14:14:06 | INFO | model_worker | Task: quality_compare
+2025-09-02 14:14:06 | INFO | model_worker | Reference path: ../log_serve/serve_images/2025-09-02/abbb9c573fcf890b230e23112a44a854.png
+2025-09-02 14:14:06 | INFO | model_worker | Image A path: ../log_serve/serve_images/2025-09-02/57a14c89cb3fec45a8f9e3ca4b96f731.png
+2025-09-02 14:14:06 | INFO | model_worker | Image B path: ../log_serve/serve_images/2025-09-02/ac19476180c596a1288e6e94beb0895d.png
+2025-09-02 14:14:06 | INFO | model_worker | query: 
+2025-09-02 14:14:17 | ERROR | stderr | Exception in thread Thread-3 (generate):
+2025-09-02 14:14:17 | ERROR | stderr | Traceback (most recent call last):
+2025-09-02 14:14:17 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/peft/tuners/lora.py", line 278, in __getattr__
+2025-09-02 14:14:17 | ERROR | stderr |     return super().__getattr__(name)  # defer to nn.Module's logic
+2025-09-02 14:14:17 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1962, in __getattr__
+2025-09-02 14:14:17 | ERROR | stderr |     raise AttributeError(
+2025-09-02 14:14:17 | ERROR | stderr | AttributeError: 'LoraModel' object has no attribute 'generate'
+```
+
+```
+# src/model/depictqa.py
+- outputs = self.llm.generate(**inputs_generate)
+
+# Use the base model's generate method since LoRA doesn't support it directly
++ outputs = self.llm.base_model.generate(**inputs_generate)
+```
+
+### Issue - AttributeError: 'AsyncRequest' object has no attribute '_json_response_data'
+```
+2025-09-02 14:23:09 | INFO | gradio_web_server | load_demo. ip: 127.0.0.1
+2025-09-02 14:23:09 | INFO | gradio_web_server | Models: ['DepictQA_vicuna_v1_7B']
+2025-09-02 14:23:20 | INFO | gradio_web_server | add_text. ip: 127.0.0.1. len: 0
+2025-09-02 14:23:20 | INFO | gradio_web_server | ('', [<PIL.Image.Image image mode=RGB size=3169x4753 at 0x17F75C7C0>, <PIL.Image.Image image mode=RGB size=3840x2160 at 0x17F75CA00>, <PIL.Image.Image image mode=RGB size=4000x6001 at 0x17F75CA30>])
+2025-09-02 14:23:20 | ERROR | asyncio | Task exception was never retrieved
+future: <Task finished name='pf5ru7m0sej_9' coro=<Queue.process_events() done, defined at /Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/gradio/queueing.py:342> exception=AttributeError("'AsyncRequest' object has no attribute '_json_response_data'")>
+Traceback (most recent call last):
+  File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/gradio/queueing.py", line 369, in process_events
+    while response.json.get("is_generating", False):
+  File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/gradio/utils.py", line 543, in json
+    return self._json_response_data
+AttributeError: 'AsyncRequest' object has no attribute '_json_response_data'
+2025-09-02 14:23:20 | INFO | gradio_web_server | http_bot. ip: 127.0.0.1
+2025-09-02 14:23:20 | INFO | gradio_web_server | model_name: DepictQA_vicuna_v1_7B, worker_addr: http://127.0.0.1:22222
+2025-09-02 14:23:20 | INFO | gradio_web_server | ==== request ====
+{'img_paths': ['../log_serve/serve_images/2025-09-02/549ae371eaaf2c4ab382628d16b761a0.png', '../log_serve/serve_images/2025-09-02/342cf853a215ea7d84da0f353e1750d5.png', '../log_serve/serve_images/2025-09-02/57a14c89cb3fec45a8f9e3ca4b96f731.png'], 'query': '', 'task_type': 'quality_compare', 'temperature': 0.0, 'top_p': 0.9, 'max_new_tokens': 400, 'max_all_tokens': 512, 'stop': '</s>'}
+2025-09-02 14:23:20 | INFO | httpx | HTTP Request: POST http://127.0.0.1:8081/api/predict "HTTP/1.1 200 OK"
+2025-09-02 14:23:25 | INFO | httpx | HTTP Request: POST http://127.0.0.1:8081/reset "HTTP/1.1 200 OK"
+```
+
+```
+# src/serve/gradio_web_server.py
+try:
+except json.JSONDecodeError:
+                    logger.error(f"Failed to decode JSON from chunk: {chunk}")
+                    continue
+```
+
+### Issue - UserWarning: Failed to load image Python extension
+
+```
+(depictqa) ➜  DQ495K_Abstractor git:(main) ✗ sh launch_worker.sh
+Setting ds_accelerator to cuda (auto detect)
+/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:49: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, input, weight, bias=None):
+/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:67: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, grad_output):
+/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torchvision/io/image.py:13: UserWarning: Failed to load image Python extension: dlopen(/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torchvision/image.so, 0x0006): Symbol not found: __ZN3c1017RegisterOperatorsD1Ev
+  Referenced from: <0B637046-A38B-3A5C-80C6-E847C27DCCD5> /Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torchvision/image.so
+  Expected in:     <B6BD92AE-4D03-3F92-9E03-2E2594A12866> /Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/lib/libtorch_cpu.dylib
+  warn(f"Failed to load image Python extension: {e}")
+```
+
+```
+# expriments/DQ495K_Abstractor/launch_worker.sh
+#!/bin/bash
+export PYTHONPATH=../../src/:$PYTHONPATH
+export PYTORCH_ENABLE_MPS_FALLBACK=1
+
+python -m serve.depictqa_worker --cfg config_mps.yaml
+
+```
+
+```
+# src/model/depictqa.py
+        # Load model with device placement and dtype handling
+        self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        self.llm = AutoModelForCausalLM.from_pretrained(
+            llm_path,
+            trust_remote_code=True,
+            torch_dtype=torch.float32,  # Use float32 for MPS
+            device_map={"": self.device}  # Place all modules on MPS
+        )
+```
+
+Added disk offloading with offload_folder="offload"
+`mkdir -p offload`
+
+`pip install -U bitsandbytes`
+
+
+### Issue - RuntimeError: Input type (MPSFloatType) and weight type (torch.FloatTensor) should be the same
+```
+2025-09-02 14:48:47 | INFO | model_worker | query: 
+2025-09-02 14:48:47 | ERROR | stderr | Exception in thread Thread-3 (generate):
+2025-09-02 14:48:47 | ERROR | stderr | Traceback (most recent call last):
+2025-09-02 14:48:47 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/threading.py", line 1016, in _bootstrap_inner
+2025-09-02 14:48:47 | ERROR | stderr |     self.run()
+2025-09-02 14:48:47 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/threading.py", line 953, in run
+2025-09-02 14:48:47 | ERROR | stderr |     self._target(*self._args, **self._kwargs)
+2025-09-02 14:48:47 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/depictqa.py", line 451, in generate
+2025-09-02 14:48:47 | ERROR | stderr |     input_embs, attn_mask = self.get_generate_embs(inputs)
+2025-09-02 14:48:47 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/depictqa.py", line 422, in get_generate_embs
+2025-09-02 14:48:47 | ERROR | stderr |     img_embs = self.emb_img(inputs["img_path"])
+2025-09-02 14:48:47 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/depictqa.py", line 102, in emb_img
+2025-09-02 14:48:47 | ERROR | stderr |     img_embs = self.clip_encode(imgs)  # [B, N, C]
+2025-09-02 14:48:47 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/depictqa.py", line 114, in clip_encode
+2025-09-02 14:48:47 | ERROR | stderr |     img_embs = self.vision_encoder.forward_patch_features(imgs)  # [B, N, C]
+2025-09-02 14:48:47 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/clip/model_clip.py", line 366, in forward_patch_features
+2025-09-02 14:48:47 | ERROR | stderr |     x = self.conv1(x)  # shape = [*, width, grid, grid]
+2025-09-02 14:48:47 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+2025-09-02 14:48:47 | ERROR | stderr |     return self._call_impl(*args, **kwargs)
+2025-09-02 14:48:47 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+2025-09-02 14:48:47 | ERROR | stderr |     return forward_call(*args, **kwargs)
+2025-09-02 14:48:47 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/nn/modules/conv.py", line 548, in forward
+2025-09-02 14:48:47 | ERROR | stderr |     return self._conv_forward(input, self.weight, self.bias)
+2025-09-02 14:48:47 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/nn/modules/conv.py", line 543, in _conv_forward
+2025-09-02 14:48:47 | ERROR | stderr |     return F.conv2d(
+2025-09-02 14:48:47 | ERROR | stderr | RuntimeError: Input type (MPSFloatType) and weight type (torch.FloatTensor) should be the same
+```
+```
+# src/model/clip/model_clip.py
+        # Move conv1 weights to match input device and dtype
+        self.conv1.weight = nn.Parameter(self.conv1.weight.to(device=x.device, dtype=x.dtype))
+        if self.conv1.bias is not None:
+            self.conv1.bias = nn.Parameter(self.conv1.bias.to(device=x.device, dtype=x.dtype))
+            
+- self.class_embedding.to(x.dtype)
++ self.class_embedding = self.class_embedding.to(device=x.device, dtype=x.dtype)
+
+- x = x + pos_embedding.to(x.dtype)
++ x = x + pos_embedding.to(device=x.device, dtype=x.dtype)
+```
+
+### Issue - RuntimeError: Passed CPU tensor to MPS op
+```
+2025-09-02 14:52:59 | INFO | model_worker | Task: quality_compare
+2025-09-02 14:52:59 | INFO | model_worker | Reference path: ../log_serve/serve_images/2025-09-02/1841b82b961fb5dd17d25aab96b14b17.png
+2025-09-02 14:52:59 | INFO | model_worker | Image A path: ../log_serve/serve_images/2025-09-02/36b5474e095f522961deacaec7fac849.png
+2025-09-02 14:52:59 | INFO | model_worker | Image B path: ../log_serve/serve_images/2025-09-02/57a14c89cb3fec45a8f9e3ca4b96f731.png
+2025-09-02 14:52:59 | INFO | model_worker | query: 
+2025-09-02 14:53:00 | ERROR | stderr | Exception in thread Thread-3 (generate):
+2025-09-02 14:53:00 | ERROR | stderr | Traceback (most recent call last):
+2025-09-02 14:53:00 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/threading.py", line 1016, in _bootstrap_inner
+2025-09-02 14:53:00 | ERROR | stderr |     self.run()
+2025-09-02 14:53:00 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/threading.py", line 953, in run
+2025-09-02 14:53:00 | ERROR | stderr |     self._target(*self._args, **self._kwargs)
+2025-09-02 14:53:00 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/depictqa.py", line 451, in generate
+2025-09-02 14:53:00 | ERROR | stderr |     input_embs, attn_mask = self.get_generate_embs(inputs)
+2025-09-02 14:53:00 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/depictqa.py", line 422, in get_generate_embs
+2025-09-02 14:53:00 | ERROR | stderr |     img_embs = self.emb_img(inputs["img_path"])
+2025-09-02 14:53:00 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/depictqa.py", line 102, in emb_img
+2025-09-02 14:53:00 | ERROR | stderr |     img_embs = self.clip_encode(imgs)  # [B, N, C]
+2025-09-02 14:53:00 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/depictqa.py", line 114, in clip_encode
+2025-09-02 14:53:00 | ERROR | stderr |     img_embs = self.vision_encoder.forward_patch_features(imgs)  # [B, N, C]
+2025-09-02 14:53:00 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/clip/model_clip.py", line 393, in forward_patch_features
+2025-09-02 14:53:00 | ERROR | stderr |     x = self.ln_pre(x)
+2025-09-02 14:53:00 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+2025-09-02 14:53:00 | ERROR | stderr |     return self._call_impl(*args, **kwargs)
+2025-09-02 14:53:00 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+2025-09-02 14:53:00 | ERROR | stderr |     return forward_call(*args, **kwargs)
+2025-09-02 14:53:00 | ERROR | stderr |   File "/Users/gavinxiang/Downloads/DepictQA-Exercise/src/model/clip/model_clip.py", line 212, in forward
+2025-09-02 14:53:00 | ERROR | stderr |     ret = super().forward(
+2025-09-02 14:53:00 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/nn/modules/normalization.py", line 217, in forward
+2025-09-02 14:53:00 | ERROR | stderr |     return F.layer_norm(
+2025-09-02 14:53:00 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/nn/functional.py", line 2905, in layer_norm
+2025-09-02 14:53:00 | ERROR | stderr |     return torch.layer_norm(
+2025-09-02 14:53:00 | ERROR | stderr | RuntimeError: Passed CPU tensor to MPS op
+```
+
+```
+# src/model/clip/model_clip.py
+# orig_type = x.dtype
+ret = super().forward(
+x
+)  # .type(torch.float16))        # Warning: Originally avoid fp32 in clip
+return ret  # .type(orig_type)
+```
+
+```
+# src/model/clip/model_clip.py
+        # Move layer parameters to match input device
+        if self.weight is not None:
+            self.weight = self.weight.to(device=x.device, dtype=x.dtype)
+        if self.bias is not None:
+            self.bias = self.bias.to(device=x.device, dtype=x.dtype)
+        return super().forward(x)
+```
+
+```
+2025-09-02 14:58:46 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/nn/functional.py", line 5695, in _in_projection_packed
+2025-09-02 14:58:46 | ERROR | stderr |     proj = linear(q, w, b)
+2025-09-02 14:58:46 | ERROR | stderr | RuntimeError: Tensor for argument weight is on cpu but expected on mps
+```
+
+```
+# src/model/clip/model_clip.py
+        # Move MLP parameters to match input device
+        for module in self.mlp.modules():
+            if isinstance(module, nn.Linear):
+                if module.weight is not None:
+                    module.weight = nn.Parameter(module.weight.to(device=x.device, dtype=x.dtype))
+                if module.bias is not None:
+                    module.bias = nn.Parameter(module.bias.to(device=x.device, dtype=x.dtype))
+                    
+        x = x + self.mlp(self.ln_2(x))
+```
+```
+# src/model/clip/abstractor.py
+        device = vision_embs.device
+        
+        # Move parameters to match input device
+        if self.query_embeds.device != device:
+            self.query_embeds = nn.Parameter(self.query_embeds.to(device=device, dtype=vision_embs.dtype))
+            
+```
+
 ## Practical Notes - Cmds
 ### how to exit conda
 `conda deactivate`
@@ -340,6 +592,23 @@ Setting ds_accelerator to cuda (auto detect)
 2025-09-02 13:46:52 | ERROR | stderr |   File "/Users/gavinxiang/miniconda3/envs/depictqa/lib/python3.10/site-packages/torch/cuda/__init__.py", line 403, in _lazy_init
 2025-09-02 13:46:52 | ERROR | stderr |     raise AssertionError("Torch not compiled with CUDA enabled")
 2025-09-02 13:46:52 | ERROR | stderr | AssertionError: Torch not compiled with CUDA enabled
+```
+After replacing CUDA with CPU/MPS, it works:
+```
+pip install protobuf==3.20.0
+```
+Great! The worker is now running successfully on MPS. Let me summarize what we did to fix the MPS compatibility:
+Modified the CLIP module to use MPS instead of CUDA:
+Updated CustomTransform class to use MPS device
+Changed tensor device initialization to use MPS
+Modified the DepictQA model to use MPS:
+Updated device initialization to use MPS instead of CUDA
+Fixed device handling in the worker
+Fixed protobuf version issue:
+Downgraded protobuf to version 3.20.0 to resolve tokenizer issues
+The worker is now running successfully and you can see it's sending heartbeats to the controller. 
+```
+
 ```
 
 3. Start the gradio web UI (port 8081)
