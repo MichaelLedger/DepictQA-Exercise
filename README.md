@@ -127,6 +127,8 @@ We provide a gradio demo for local test.
 
 - Launch DepictQA worker: `sh launch_worker.sh id_of_one_gpu`
 
+> The worker is now running on your system using MPS (Metal Performance Shaders) for GPU acceleration on your Mac. You don't need to specify a GPU ID since macOS handles GPU access differently from Linux systems with NVIDIA GPUs.
+
 You can revise the server config in _serve.yaml_. The url of deployed demo will be _http://{serve.gradio.host}:{serve.gradio.port}_. The default url is http://0.0.0.0:12345 if you do not revise _serve.yaml_. 
 
 Note that **multiple workers can be launched simultaneously**. For each worker, _serve.worker.host_, _serve.worker.port_, _serve.worker.worker\_url_, and _serve.worker.model\_name_ should be unique. 
@@ -561,6 +563,9 @@ return ret  # .type(orig_type)
 ### how to exit conda
 `conda deactivate`
 
+### PyTorch with MPS support is properly installed
+`python3 -c "import torch; print(f'PyTorch version: {torch.__version__}\nMPS available: {torch.backends.mps.is_available()}\nMPS built: {torch.backends.mps.is_built()}')"`
+
 ### gradio demo for local test
 
 *prepare environment*
@@ -593,7 +598,9 @@ Setting ds_accelerator to cuda (auto detect)
 2025-09-02 13:46:52 | ERROR | stderr |     raise AssertionError("Torch not compiled with CUDA enabled")
 2025-09-02 13:46:52 | ERROR | stderr | AssertionError: Torch not compiled with CUDA enabled
 ```
-After replacing CUDA with CPU/MPS, it works:
+
+> The error occurs because the code is trying to use CUDA (GPU) operations but your PyTorch installation wasn't compiled with CUDA support. Since you're on macOS (as indicated by the darwin OS version), you'll need to use MPS (Metal Performance Shaders) instead of CUDA for GPU acceleration, or fallback to CPU.
+
 ```
 pip install protobuf==3.20.0
 ```
