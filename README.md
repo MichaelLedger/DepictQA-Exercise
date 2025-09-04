@@ -617,6 +617,9 @@ The worker is now running successfully and you can see it's sending heartbeats t
 ```
 
 ```
+// Always use mps first, cpu only will causing cpu temperature high even burning to death.
+device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+```
 
 3. Start the gradio web UI (port 8081)
 ```
