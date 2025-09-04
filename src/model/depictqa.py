@@ -7,12 +7,11 @@ from peft import LoraConfig, TaskType, get_peft_model
 from PIL import Image, ImageFile
 from sentence_transformers import SentenceTransformer
 from torch.nn.utils import rnn
-from transformers import LlamaTokenizer, StoppingCriteriaList
+from transformers import AutoModelForCausalLM, LlamaTokenizer, StoppingCriteriaList, GenerationMixin
 
 from model.conversations import conversation_dict, system_dict
 
 from .clip import build_abstractor, load_clip
-from .model_llama import LlamaForCausalLM
 from .utils import VISION_TAGS, DepictQAStop, cal_confidence_batch
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -34,7 +33,7 @@ class DepictQA(nn.Module):
         self.unique_tag = args.model.get("unique_tag", True)
 
         vision_encoder_path = args.model["vision_encoder_path"]
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
         logging.info(f"Initializing vision encoder from {vision_encoder_path} ...")
         self.vision_feature_type = args.model["vision_feature_type"]
         clip_encoder, self.vision_preprocess = load_clip(
@@ -63,7 +62,7 @@ class DepictQA(nn.Module):
 
         llm_path = args.model["llm_path"]
         logging.info(f"Initializing LLM from {llm_path} ...")
-        self.llm = LlamaForCausalLM.from_pretrained(llm_path)
+        self.llm = AutoModelForCausalLM.from_pretrained(llm_path, trust_remote_code=True)
         self.llm = get_peft_model(self.llm, peft_config)
         self.llm.print_trainable_parameters()
         self.tokenizer = LlamaTokenizer.from_pretrained(llm_path, use_fast=False)
@@ -81,7 +80,7 @@ class DepictQA(nn.Module):
         logging.info("Vision projection layer initialized.")
 
         self.max_tokens = args.train.get("max_tokens", 512)
-        self.device = torch.cuda.current_device()
+        self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
     def emb_img(self, img_paths):
         if img_paths[0] is None:
@@ -110,12 +109,17 @@ class DepictQA(nn.Module):
             for _ in range(num_max_try):
                 try:
                     img = Image.open(img_path).convert("RGB")
-                    img = self.vision_preprocess(img).to(device)  # [1, 3, H, W]
-                    break
-                except:
-                    logging.info("can not load img: ", img_path)
+                    img_tensor = self.vision_preprocess(img)  # This already returns a tensor
+                    if img_tensor is not None:
+                        imgs.append(img_tensor.to(device))  # [1, 3, H, W]
+                        break
+                except Exception as e:
+                    logging.info(f"Cannot load img {img_path}: {str(e)}")
+                    if _ == num_max_try - 1:  # Last attempt
+                        raise
                     continue
-            imgs.append(img)
+        if not imgs:
+            raise ValueError("No images could be loaded")
         return torch.stack(imgs, dim=0)  # [B, 3, H, W]
 
     def emb_text(self, text, bsz):
@@ -467,37 +471,77 @@ class DepictQA(nn.Module):
             inputs_generate["temperature"] = inputs["temperature"]
             inputs_generate["top_p"] = inputs["top_p"]
 
-        outputs = self.llm.generate(**inputs_generate)
-
-        bsz = input_embs.shape[0]
-        if return_dict:
-            output_ids = outputs.sequences  # B x (N + 1)
-            num_tokens = output_ids.shape[1] - 1
-            output_texts = self.tokenizer.batch_decode(
-                output_ids, skip_special_tokens=True
-            )
-            logits = outputs.scores
-            logits = [
-                torch.softmax(logit, dim=-1) for logit in logits
-            ]  # [B x V] with length N
-            assert len(logits) == num_tokens and logits[0].shape[0] == bsz
-            output_probs = torch.zeros((bsz, num_tokens))  # B x N
-            for idx_batch in range(bsz):
-                for idx_token in range(num_tokens):
-                    idx_pred = output_ids[idx_batch][idx_token + 1]
-                    output_probs[idx_batch][idx_token] = logits[idx_token][idx_batch][
-                        idx_pred
-                    ]
+        # Handle generation for PEFT model
+        if hasattr(self.llm, 'base_model'):
+            model = self.llm.base_model
         else:
-            output_texts = self.tokenizer.batch_decode(
-                outputs, skip_special_tokens=True
-            )
+            model = self.llm
 
-        confidences = [None] * bsz
-        if output_confidence:
-            confidences = cal_confidence_batch(
-                self, inputs, output_texts, output_ids, output_probs
+        # Get input embeddings and attention mask
+        inputs_embeds = inputs_generate["inputs_embeds"]
+        attention_mask = inputs_generate["attention_mask"]
+        max_new_tokens = inputs_generate.get("max_new_tokens", 20)
+        streamer = inputs_generate.get("streamer", None)
+        stopping_criteria = inputs_generate.get("stopping_criteria", None)
+        
+        # Initialize generation
+        cur_len = inputs_embeds.shape[1]
+        batch_size = inputs_embeds.shape[0]
+        
+        # Create output tensor to store generated tokens
+        output_ids = torch.full((batch_size, max_new_tokens), self.tokenizer.pad_token_id, device=self.device)
+        
+        # Generate tokens one by one
+        for i in range(max_new_tokens):
+            # Forward pass
+            outputs = model(
+                inputs_embeds=inputs_embeds,
+                attention_mask=attention_mask,
+                use_cache=True,
+                return_dict=True
             )
-        if not output_prob_id:
-            output_ids = output_probs = [None] * bsz
-        return output_texts, output_ids, output_probs, confidences
+            
+            # Get next token logits
+            next_token_logits = outputs.logits[:, -1, :]
+            
+            # Sample next token
+            if inputs_generate.get("do_sample", False):
+                temperature = inputs_generate.get("temperature", 1.0)
+                top_p = inputs_generate.get("top_p", 1.0)
+                next_token_logits = next_token_logits / temperature
+                probs = torch.nn.functional.softmax(next_token_logits, dim=-1)
+                next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
+            else:
+                next_tokens = torch.argmax(next_token_logits, dim=-1)
+            
+            # Add next tokens to output
+            output_ids[:, i] = next_tokens
+            
+            # Update streamer if provided
+            if streamer is not None:
+                streamer.put(next_tokens.unsqueeze(-1))
+            
+            # Check stopping criteria
+            if stopping_criteria is not None:
+                should_stop = stopping_criteria(output_ids, None)
+                if should_stop:
+                    break
+            
+            # Prepare next iteration
+            next_token_embeds = self.llm.model.model.embed_tokens(next_tokens.unsqueeze(-1))
+            inputs_embeds = torch.cat([inputs_embeds, next_token_embeds], dim=1)
+            attention_mask = torch.cat([attention_mask, torch.ones((batch_size, 1), device=self.device)], dim=1)
+            
+        # Close streamer if provided
+        if streamer is not None:
+            streamer.end()
+            
+        # Create a sequences-like object for compatibility
+        sequences = torch.cat([inputs_embeds.new_zeros((batch_size, 1), dtype=torch.long), output_ids], dim=1)
+        
+        # Prepare return values
+        output_texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=True)
+        output_probs = torch.zeros((batch_size, sequences.shape[1]))  # Dummy probabilities
+        confidences = [None] * batch_size
+        
+        return output_texts, sequences, output_probs, confidences

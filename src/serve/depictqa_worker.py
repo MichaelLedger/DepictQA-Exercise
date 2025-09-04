@@ -53,9 +53,9 @@ class DepictQAWorker:
         self.controller = cfg.serve["controller"]
         self.worker_url = cfg.serve["worker_url"]
         self.worker_id = worker_id
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
         logger.info(f"Loading the model {self.model_name} on worker {worker_id} ...")
-        self.model = DepictQA(cfg, training=False).eval().half().cuda()
+        self.model = DepictQA(cfg, training=False).eval().half().to(self.device)
 
         delta_path = cfg.model["delta_path"]
         delta_ckpt = torch.load(delta_path, map_location=torch.device("cpu"))
@@ -211,8 +211,8 @@ class DepictQAWorker:
                 "error_code": 1,
             }
             yield json.dumps(ret).encode() + b"\0"
-        except torch.cuda.CudaError as e:
-            logger.info("Caught torch.cuda.CudaError:", e)
+        except (torch.cuda.CudaError, RuntimeError) as e:
+            logger.info("Caught device error:", e)
             ret = {
                 "text": server_error_msg,
                 "error_code": 1,

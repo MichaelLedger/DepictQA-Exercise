@@ -110,12 +110,9 @@ class CustomTransform:
         self.crop_ratio = crop_ratio
         self.keep_ratio = keep_ratio
         self.random_crop = True if training else False
-        self.mean_cuda = torch.tensor((0.48145466, 0.4578275, 0.40821073))[
-            :, None, None
-        ].cuda()
-        self.std_cuda = torch.tensor((0.26862954, 0.26130258, 0.27577711))[
-            :, None, None
-        ].cuda()
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        self.mean = torch.tensor((0.48145466, 0.4578275, 0.40821073), dtype=torch.float32)[:, None, None].to(device)
+        self.std = torch.tensor((0.26862954, 0.26130258, 0.27577711), dtype=torch.float32)[:, None, None].to(device)
 
     def __call__(self, img):
         h, w = img.height, img.width
@@ -148,9 +145,10 @@ class CustomTransform:
         # 2. torch.tensor().cuda() to replace ToTensor. 
         # 3. (img.cuda() - mean.cuda()) / std.cuda() to replace Normalize. 
         """
-        img = np.array(img) / 255.0
-        img = torch.tensor(img).permute(2, 0, 1).cuda()
-        img = (img - self.mean_cuda) / self.std_cuda
+        img = np.array(img, dtype=np.float32) / 255.0  # Explicitly use float32
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        img = torch.tensor(img, dtype=torch.float32).permute(2, 0, 1).to(device)
+        img = (img - self.mean) / self.std
         return img
 
 
@@ -163,7 +161,7 @@ def load_clip(
     name: str,
     training: bool,
     vision_preprocess: dict,
-    device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu",
+    device: Union[str, torch.device] = "mps" if torch.backends.mps.is_available() else "cpu",
     jit: bool = False,
     download_root: str = None,
 ):
